@@ -1,0 +1,283 @@
+# =============================================================================
+# time_combined — standardized timekeeping (target contract)
+# -----------------------------------------------------------------------------
+# Conforms to the data-dict spec (https://data-dict.tidyverse.org/spec.html).
+#
+# SCOPE
+#   This documents the TARGET shape of `time_combined`, the object produced by
+#   each matter's scripts/jr_working/load/time_combine.R after per-format
+#   import/cleaning and BEFORE de-duplication or overlap removal.
+#
+#   It is a cross-matter reusable contract, not a live extract of any one
+#   matter's actual output. It was drafted from a code review of three
+#   matters (id_fregozo_000062, apex_mangiafico_000092, crown_north_000151)
+#   as of 2026-09-21, and is intentionally scoped to the columns that recur
+#   across matters or that Jon named as standard. Vendor/format-specific
+#   extension columns (e.g. a rounding-exception code, a labor-category path,
+#   a per-site state label) will legitimately keep appearing beyond this core
+#   set as new timekeeping vendors are onboarded — that matter's own
+#   time_import_f*.R / time_combine.R remain the authoritative source for
+#   those, not this file.
+#
+#   Example values below are synthetic placeholders, not values pulled from
+#   any client's actual data.
+# =============================================================================
+
+$version: 0.1.0
+$learn_more: https://data-dict.tidyverse.org/
+
+name: wh_time_combined
+label: "Wage-and-Hour Timekeeping — Combined Punch Data (target schema)"
+description: >
+  Cross-matter target schema for the harmonized, punch-level timekeeping
+  table (`time_combined`) that each matter's load scripts assemble from one
+  or more raw timekeeping export formats. One row is intended to represent
+  one worked punch/shift segment for one employee on one date, after
+  format-specific cleaning but before de-duplication or overlap handling.
+version: '2026-09-21'
+
+glossary:
+  EIN:
+    description: >
+      Employee Identification Number as used in this firm's timekeeping
+      pipelines — an employee-level identifier from the client's own
+      system(s). NOT the IRS "Employer Identification Number." Format
+      (numeric, zero-padded, or alphanumeric) varies by client system.
+  punch:
+    description: >
+      A single clock-in or clock-out event recorded by a timekeeping system.
+      A "segment" or "shift" is typically one in-punch plus one out-punch.
+  rounding:
+    description: >
+      A policy-driven adjustment some timekeeping systems apply to raw
+      punches (e.g., rounding to the nearest 5 minutes). When a source
+      reports both, the raw punch and the rounded punch are captured as
+      separate columns (time_in/time_out vs rounded_in/rounded_out).
+  od_id:
+    description: >
+      Ogletree-internal employee identifier, resolved by a separate
+      EIN/name-reconciliation step and joined onto the combined timekeeping
+      data — not present in any raw source file.
+
+tables:
+  - name: time_combined
+    label: Combined timekeeping (punch-level)
+    description: >
+      Harmonized punch/segment-level timekeeping records, standardized from
+      one or more raw source formats. Import + clean + combine only — no
+      de-duplication or overlap removal is assumed to have happened yet at
+      this stage.
+    todo:
+      - >
+        Paycode/leave-type consolidation (see the `timecode` column below)
+        has not actually been implemented in any of the three matters
+        reviewed — each still emits its source format's raw column name
+        (`apply_to`, `timecode`, or `paycode`) unchanged, and time_combine.R
+        does not rename or reconcile them. Treat `timecode` as aspirational
+        until the import scripts are updated.
+      - >
+        id_fregozo_000062's time_import_f2.R carries a header comment
+        marking it "TODO: incomplete pending structure review," but
+        time_combine.R's bind_rows() call includes time_f2 unconditionally
+        (not gated on that TODO). Confirm with Jon whether f2 is actually
+        complete before relying on rows tagged source_group == "time_f2".
+      - >
+        id_fregozo_000062's time_import_f6.R does not cast its `ein` column
+        (sourced from `employeenum`) to character before combine, unlike
+        f1/f3/f8/f9, which are explicitly cast. If `employeenum` is numeric,
+        this is a latent type-mismatch risk when bind_rows() stacks it
+        against character `ein` columns from other formats.
+      - >
+        Exception-code columns are pluralized inconsistently across formats
+        (`in_exceptions`/`out_exceptions` vs `in_exception`/`out_exception`)
+        and are not part of this core schema for that reason — resolve the
+        naming before promoting them to a standard column.
+      - >
+        No single column or combination reliably functions as a primary key
+        across every source format reviewed (e.g., id_fregozo_000062's
+        time_import_f5.R never produces an `ein` at all, so ein+date+time_in
+        is not unique/complete there). No `constraints: [primary_key]` is
+        asserted on any column below as a result.
+    columns:
+      # --- required core -----------------------------------------------
+      - name: date
+        type: date
+        constraints: [required]
+        description: Calendar date of the work day the punch/segment belongs to.
+        details: >
+          Derivation varies by source: sometimes read directly from a date
+          column, sometimes truncated from a full in-punch datetime. Some
+          formats supply date only on the first punch of a multi-punch day
+          and require a fill-down — check the matter's import script.
+        range: ['2021-01-01', '2026-12-31']
+        # Illustrative only. Actual coverage is set by each matter's
+        # statute-of-limitations period and production date range, not by
+        # this schema.
+
+      - name: time_in
+        type: datetime
+        constraints: [required]
+        description: >
+          Actual (not scheduled, not rounded) clock-in timestamp — the raw
+          in-punch time combined with that row's date.
+        details: >
+          Some source formats provide only a time-of-day value with no
+          explicit date attached to the punch itself; the date component is
+          supplied from `date` during import. This column reflects the
+          uncorrected punch — see time_out for the midnight-crossing
+          adjustment convention.
+
+      - name: time_out
+        type: datetime
+        constraints: [required]
+        description: >
+          Actual (not scheduled, not rounded) clock-out timestamp — the raw
+          out-punch time combined with that row's date.
+        details: >
+          When the raw out-punch clock time is earlier than time_in on the
+          same date (an overnight shift), each import script reviewed adds
+          one day to time_out to correct for crossing midnight. Confirm this
+          correction has actually been applied for a given format before
+          computing elapsed time from time_in/time_out directly.
+
+      # --- standard optional (named by Jon) -----------------------------
+      - name: ein
+        type: string
+        description: Employee identifier as recorded by the source timekeeping system.
+        details: >
+          Deliberately typed as a flexible string rather than assumed
+          numeric — different client systems represent EINs as plain
+          numeric strings, zero-padded numeric strings, or alphanumeric
+          codes. Compare as character across formats unless a specific
+          matter's scripts guarantee a consistent numeric type.
+        examples: ['10023', 'A4471', '088231']
+        todo: >
+          At least one reviewed format (id_fregozo_000062's time_f5) does
+          not produce an ein column at all, which leaves ein as NA for
+          those rows once combined via bind_rows(). Not yet resolved.
+
+      - name: od_id
+        type: string
+        description: >
+          Ogletree-internal, cross-format employee identifier. See glossary.
+        details: >
+          Only produced when a matter has built and joined this kind of
+          reconciliation lookup (observed once, in id_fregozo_000062, via a
+          manually-reviewed name/EIN reconciliation file). Treat as optional
+          infrastructure for matters where `ein` alone isn't a reliable
+          employee key — not a universally populated column.
+
+      - name: rounded_in
+        type: datetime
+        description: >
+          Rounded/policy-adjusted clock-in time, when the source system
+          reports both an actual punch and a separately rounded value.
+        details: >
+          Only meaningful for source formats that actually apply and report
+          a rounding step (observed in crown_north_000151's format only, of
+          the three matters reviewed). Do not assume this is populated
+          whenever time_in is.
+
+      - name: rounded_out
+        type: datetime
+        description: >
+          Rounded/policy-adjusted clock-out time, when the source system
+          reports both an actual punch and a separately rounded value.
+        details: See rounded_in.
+
+      - name: orig_hours
+        type: number(quantity)
+        units: hours
+        description: >
+          Hours value as reported directly by the source system for this
+          row/segment — not recomputed here from time_in/time_out.
+        details: >
+          Not comparable 1:1 across every source format. Some sources
+          report one total figure per segment (the typical shape this
+          column assumes). At least one reviewed source (an EMP NOVAtime
+          export, id_fregozo_000062 time_f8) instead reports the day's
+          hours split into four separate figures — regular, overtime,
+          double-time, and a daily total — with no single column matching
+          this shape. A separate matter (apex_mangiafico_000092) names its
+          equivalent field `hours`, not `orig_hours`.
+        todo: >
+          Decide whether NOVAtime-style reg/OT/DT/daily breakdowns should be
+          summed into orig_hours at import time, kept as separate additional
+          columns, or both — not yet resolved in the reviewed matters.
+
+      # --- standard optional (added on review; flagged for Jon's sign-off) --
+      - name: name_normed
+        type: string
+        description: >
+          Employee full name, cleaned/standardized by the shared
+          name-normalization helper (clean_ee_name()) used across matters'
+          import scripts.
+        details: >
+          Not populated when the raw source has no employee-name field at
+          all (observed in crown_north_000151, where ein is the only
+          identifier) — do not assume this column is always non-missing.
+        examples: ['JANE DOE', 'CARLOS RODRIGUEZ']
+
+      - name: timecode
+        type: string
+        description: >
+          Pay code / leave-type / transaction-apply-to code attached to a
+          punch or segment (e.g., regular hours worked, vacation, sick, a
+          named holiday, a pay adjustment).
+        details: >
+          This is the TARGET column name, per Jon's direction to consolidate
+          apply_to / timecode / paycode into one column. As of this review,
+          none of the three matters' import scripts actually emit a common
+          `timecode` column yet — see the table-level todo.
+        examples: ['Hours Worked', 'Vacation', 'Sick', 'Holiday']
+
+      - name: source_group
+        type: string
+        description: >
+          Import batch/format-group tag identifying which format-specific
+          importer produced this row.
+        details: >
+          Values are matter- and script-specific labels (e.g. "time_f1"),
+          not a fixed enum — see each matter's scripts/jr_working/load/ for
+          its current set.
+        examples: ['time_f1', 'time_f2', 'time_f8']
+
+      - name: source_file
+        type: string
+        description: Original file name the row was read from, as captured at import time.
+        examples: ['IDL CA timedata.xlsx', 'EMP SVMS Time Clock Punches.xlsx']
+
+      - name: source_tab
+        type: string
+        description: >
+          Worksheet/tab name within source_file, for source files with
+          multiple tabs (e.g., one tab per date range, or one tab per
+          employee).
+        details: >
+          Optional — single-tab source files don't produce this column, and
+          a column that is entirely empty for a given matter's run may be
+          dropped before the final combined data frame (at least one
+          matter's combine script runs janitor::remove_empty() on columns).
+        examples: ['Sept 2023', 'Jan 1-15 2024']
+
+      - name: source_row
+        type: number
+        description: >
+          Row number in the original source file at the time it was read
+          (counted after header/metadata rows, before any row removal).
+        details: >
+          Useful for tracing a row back to its exact source location during
+          QC, but not a stable identifier — row numbers can shift between
+          re-extractions of the same underlying data and are not unique
+          across files.
+
+      - name: source_rec_date
+        type: date
+        description: >
+          Date the underlying data production/pull was received from the
+          client or counsel, as tagged by the analyst in the corresponding
+          import script.
+        details: >
+          A fixed literal date set per format-group in the import script,
+          not read from the file itself. Reflects when the production was
+          received, not when the client generated or exported the file.
