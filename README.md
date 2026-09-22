@@ -23,13 +23,3 @@ scripts remain authoritative for those.
 
 Dictionaries follow the [data-dict spec](https://data-dict.tidyverse.org/spec.html)
 (YAML, `$version: 0.1.0`), meant to be read by the `data-dict::` R package.
-
-## Known gaps as of the first draft
-
-See the `todo:` fields inside `dictionaries/time_combined.yml` for specifics
-(paycode/timecode consolidation not yet implemented in any matter's import
-scripts, an EIN gap in one format, an unresolved TODO comment that may be
-stale, a possible type-coercion risk, and inconsistent exception-column
-naming). These are code-level findings from the three reviewed matters, not
-issues with this dictionary itself — resolving them is future work in each
-matter's own load scripts.
