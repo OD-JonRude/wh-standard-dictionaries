@@ -6,18 +6,12 @@
 # SCOPE
 #   This documents the TARGET shape of `time_combined`, the object produced by
 #   each matter's scripts/jr_working/load/time_combine.R after per-format
-#   import/cleaning and BEFORE de-duplication or overlap removal.
+#   import/cleaning.
 #
 #   It is a cross-matter reusable contract, not a live extract of any one
-#   matter's actual output. It was drafted from a code review of three
-#   matters (id_fregozo_000062, apex_mangiafico_000092, crown_north_000151)
-#   as of 2026-09-21, and is intentionally scoped to the columns that recur
-#   across matters or that Jon named as standard. Vendor/format-specific
-#   extension columns (e.g. a rounding-exception code, a labor-category path,
-#   a per-site state label) will legitimately keep appearing beyond this core
-#   set as new timekeeping vendors are onboarded — that matter's own
-#   time_import_f*.R / time_combine.R remain the authoritative source for
-#   those, not this file.
+#   matter's actual output. Vendor/format-specific columns will carry-through
+#   as well, but the data matching the described columns should be harmonized
+#   into the columns described below.
 #
 #   Example values below are synthetic placeholders, not values pulled from
 #   any client's actual data.
