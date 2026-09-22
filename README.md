@@ -1,8 +1,8 @@
 # standard-dictionaries
 
 Reusable `data-dict::`-format data dictionaries for cross-matter wage-and-hour
-data contracts (starting with combined timekeeping; more may be added over
-time — e.g. combined payroll, combined HRIS — following the same pattern).
+data contracts (starting with combined timekeeping and payroll; more may be
+added over time — e.g. combined HRIS — following the same pattern).
 
 Each dictionary here describes a **target** schema: the intended shape of a
 harmonized data frame that matter-specific load scripts (in each matter's

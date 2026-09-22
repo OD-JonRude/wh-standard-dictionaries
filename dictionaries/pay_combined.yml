@@ -1,0 +1,268 @@
+# =============================================================================
+# pay_combined — standardized payroll (target contract)
+# -----------------------------------------------------------------------------
+# Conforms to the data-dict spec (https://data-dict.tidyverse.org/spec.html).
+#
+# SCOPE
+#   This documents the TARGET shape of `pay_combined`, the harmonized payroll
+#   object each matter's scripts/jr_working/load/pay_combine.R is expected to
+#   assemble from one or more raw payroll export formats.
+#
+#   It is a cross-matter reusable contract, not a live extract of any one
+#   matter's actual output. Vendor/format-specific columns will carry-through
+#   as well, but the data matching the described columns should be harmonized
+#   into the columns described below.
+#
+#   Example values below are synthetic placeholders, not values pulled from
+#   any client's actual data.
+# =============================================================================
+
+$version: 0.1.0
+$learn_more: https://data-dict.tidyverse.org/
+
+name: wh_pay_combined
+label: "Wage-and-Hour Payroll — Combined Pay-Code Data (target schema)"
+description: >
+  Cross-matter target schema for the harmonized, pay-code-line-item-level
+  payroll table (`pay_combined`) that each matter's load scripts assemble
+  from one or more raw payroll export formats. One row is assumed to
+  represent one pay-code line item (e.g., one earnings or deduction code)
+  for one employee within one pay period, after format-specific cleaning.
+version: '2026-09-22'
+
+glossary:
+  EIN:
+    description: >
+      Employee Identification Number as used in this firm's payroll
+      pipelines — an employee-level identifier from the client's own
+      system(s). NOT the IRS "Employer Identification Number." Format
+      (numeric, zero-padded, or alphanumeric) varies by client system.
+  od_id:
+    description: >
+      Ogletree-internal employee identifier, resolved by a separate
+      EIN/name-reconciliation step and joined onto the combined payroll
+      data — not present in any raw source file. Primary key of the
+      `employees` table below; a repeating foreign key everywhere else.
+  pay_code:
+    description: >
+      A code from the source payroll system identifying the type of
+      earnings or deduction a line item represents (e.g., regular,
+      overtime, bonus, a benefits deduction). Conceptually parallel to
+      time_combined.yml's `timecode`, but not guaranteed to share the same
+      code values or granularity — payroll and timekeeping systems commonly
+      use different code sets even at the same client.
+
+tables:
+  - name: pay_combined
+    label: Combined payroll (pay-code line-item level)
+    description: >
+      Harmonized pay-code-line-item-level payroll records, standardized
+      from one or more raw source formats. No primary key is asserted on
+      this table — the natural grain is one pay-code line item, and no
+      single column or combination of columns is treated as a stable row
+      identifier here.
+    columns:
+      # --- shared with time_combined.yml (see that file for parallel defs) --
+      - name: ein
+        type: string
+        description: Employee identifier as recorded by the source payroll system.
+        details: >
+          Raw data may label this as `employee_id`, `eid`, `employee_number`,
+          or similar. Deliberately typed as a flexible string rather than
+          assumed numeric — different client systems represent EINs as plain
+          numeric strings, zero-padded numeric strings, or alphanumeric
+          codes. Compare as character across formats unless a specific
+          matter's scripts guarantee a consistent numeric type.
+        examples: ['10023', 'A4471', '088231']
+
+      - name: od_id
+        type: string
+        constraints: [foreign_key]
+        description: >
+          Ogletree-internal, cross-format employee identifier. References
+          employees.od_id (see the `employees` table and the top-level
+          `relationships:` entry below). See glossary.
+        details: >
+          Treat as optional infrastructure for matters where `ein`
+          alone isn't a reliable employee key — not a universally
+          populated column. Intended to be the same value as the
+          corresponding employee's od_id in time_combined.yml, so a
+          matter's time and pay data can be joined on it; the `employees`
+          table below is currently a duplicate of the one in
+          time_combined.yml (see that table's description for why).
+
+      - name: name_normed
+        type: string
+        description: >
+          Employee full name, cleaned/standardized by the shared
+          name-normalization helper (clean_ee_name()) used across matters'
+          import scripts.
+        details: >
+          Not populated when the raw source has no employee-name field at
+          all — do not assume this column is always non-missing.
+        examples: ['JANE DOE', 'CARLOS RODRIGUEZ']
+
+      - name: source_file
+        type: string
+        description: Original file name the row was read from, as captured at import time.
+        examples: ['ADP Payroll Register.xlsx', 'Paycor Pay History.csv']
+
+      - name: source_sheet
+        type: string
+        description: >
+          Worksheet/tab name within Excel source_file.
+        details: >
+          Optional — single-tab source files may not produce this column, and
+          a CSV source_file will not produce this column.
+        examples: ['Q1 2023', 'Q2 2023']
+
+      - name: source_row
+        type: number
+        description: >
+          Row number in the original source file at the time it was read.
+        details: >
+          Useful for tracing a row back to its exact source location during
+          QC, but not a stable identifier — row numbers can shift between
+          re-extractions of the same underlying data and are not unique
+          across files.
+
+      - name: source_rec_date
+        type: date
+        description: >
+          Date the underlying data production/pull was received from the
+          client or counsel, as tagged by the analyst in the corresponding
+          import script.
+        details: >
+          A fixed literal date set per format-group in the import script,
+          not read from the file itself. Reflects when the production was
+          received, not when the client generated or exported the file.
+
+      # --- payroll-specific -----------------------------------------------
+      - name: pay_code
+        type: string
+        constraints: [required]
+        description: >
+          Code from the source payroll system identifying the type of
+          earnings or deduction this line item represents. See glossary.
+        details: >
+          Assumed to cover both earnings and deduction line items rather
+          than earnings only, since payroll registers commonly interleave
+          both in one export — confirm this holds once a real matter is
+          reviewed; a source that splits earnings and deductions into
+          separate files/tabs may need a different handling.
+        examples: ['REG', 'OT1', 'BON', '401K']
+
+      - name: pay_code_description
+        type: string
+        description: >
+          Human-readable label for pay_code, exactly as reported by the
+          source system. A label, not a computation, same convention as
+          orig_rate/orig_period_start/orig_period_end below.
+        examples: ['Regular', 'Overtime', 'Bonus - Discretionary', '401(k) Deduction']
+
+      - name: hours
+        type: number(quantity)
+        units: hours
+        description: >
+          Hours value associated with this pay-code line item, exactly as
+          labeled/reported by the source system. A label, not a
+          computation — never derived or recomputed from other columns.
+        details: >
+          Expected to be null/NA for pay-code lines that aren't hours-based
+          (e.g., a flat bonus, an employer contribution, a per-unit
+          piece-rate line) — do not assume this column is always populated.
+          Named `hours` rather than `orig_hours` (time_combined.yml's
+          analogous field).
+
+      - name: orig_rate
+        type: number(quantity)
+        description: >
+          Pay rate exactly as labeled/reported by the source system for
+          this line item. A label, not a computation — never derived by
+          dividing amount by hours or otherwise recomputed.
+        details: >
+          Units assumed to be currency-per-hour and currency assumed USD;
+          neither is confirmed against real data yet. Expected to be
+          null/NA for salaried or flat-amount pay codes that carry no
+          per-hour rate. Revisit both assumptions once checked against a
+          real matter's payroll export, including whether any client data
+          uses a non-hourly (e.g., per-unit/piece) rate basis.
+
+      - name: amount
+        type: number(quantity)
+        constraints: [required]
+        description: >
+          Dollar amount associated with this pay-code line item, exactly as
+          reported by the source system. A label, not a computation — not
+          assumed to equal hours × orig_rate, since sources don't uniformly
+          compute it that way and some lines (flat bonuses, deductions,
+          employer contributions) have no hours/rate basis at all.
+        details: >
+          Currency assumed USD. Sign convention for
+          deductions (reported as negative amounts vs. a separate
+          earnings/deduction indicator) is source-specific — confirm per
+          matter rather than assuming either convention.
+
+      - name: pay_date
+        type: date
+        description: >
+          Date the payment was issued to the employee (paycheck date), as
+          reported by the source system.
+
+      - name: orig_period_start
+        type: date
+        description: >
+          Start date of the pay period this line item covers, exactly as
+          reported by the source system. A label, not a computation.
+        details: >
+          Some payroll systems report period boundaries once per paycheck
+          rather than per line item, in which case every line item on that
+          check would carry the same value — confirm which applies per
+          matter. Whether the boundary is inclusive is source-specific.
+
+      - name: orig_period_end
+        type: date
+        description: See orig_period_start; same conventions and caveats apply.
+
+  - name: employees
+    label: Employees (one row per employee)
+    description: >
+      One row per unique employee in a matter's data, keyed by the
+      Ogletree-internal od_id. This is the entity-level counterpart to
+      pay_combined's line-item-level grain — od_id is unique here and
+      repeats there.
+    details: >
+      This table is currently a duplicate of the `employees` table in
+      time_combined.yml, not a shared reference to it — the data-dict spec
+      has no documented mechanism for one dictionary file to reference a
+      table defined in another. The two copies should be kept in sync by
+      hand for now. If an hris_combined.yml is drafted later, that is the
+      more natural authoritative home for employee-level entity data, and
+      this table (and time_combined.yml's) should likely be reduced to a
+      pointer at that point.
+    columns:
+      - name: od_id
+        type: string
+        constraints: [primary_key, required]
+        description: >
+          Ogletree-internal, cross-format employee identifier. See glossary.
+
+      - name: name_normed
+        type: string
+        description: >
+          Employee full name, cleaned/standardized by the shared
+          name-normalization helper (clean_ee_name()). Likely present for
+          most employees but not required — a matter can build an od_id
+          reconciliation keyed on ein or other employee id fields alone
+          when no name field exists in any of its raw sources (see
+          pay_combined.name_normed).
+        examples: ['JANE DOE', 'CARLOS RODRIGUEZ']
+
+relationships:
+  - join: pay_combined.od_id = employees.od_id
+    cardinality: many-to-one
+    description: >
+      Each pay_combined row (one pay-code line item) belongs to exactly one
+      employee; each employee has zero or more pay_combined rows. Only
+      resolvable for matters that have built and joined an od_id
+      reconciliation lookup — see od_id's notes on both tables.
